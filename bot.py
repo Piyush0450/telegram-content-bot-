@@ -7,8 +7,11 @@ from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import (
-    Application, CommandHandler, MessageHandler,
-    filters, ContextTypes
+    Application,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    ContextTypes
 )
 from telegram.error import (
     TelegramError, NetworkError, BadRequest,
@@ -34,15 +37,12 @@ logger = logging.getLogger(__name__)
 # ==========================================
 
 class ContentNotFoundError(Exception):
-    """Raised when content ID doesn't exist in store"""
     pass
 
 class StorageError(Exception):
-    """Raised when JSON storage operations fail"""
     pass
 
 class InvalidDeepLinkError(Exception):
-    """Raised when deep link format is invalid"""
     pass
 
 # ==========================================
@@ -55,7 +55,6 @@ class ContentStore:
         self._ensure_file_exists()
     
     def _ensure_file_exists(self):
-        """Create storage file if it doesn't exist"""
         try:
             with open(self.filepath, 'r') as f:
                 json.load(f)
@@ -71,7 +70,6 @@ class ContentStore:
                 json.dump({}, f)
     
     def save_content(self, content_id: str, chat_id: int, message_id: int) -> None:
-        """Save content with error handling"""
         try:
             with open(self.filepath, 'r') as f:
                 data = json.load(f)
@@ -92,7 +90,6 @@ class ContentStore:
             raise StorageError(f"Could not save content: {e}")
     
     def get_content(self, content_id: str) -> dict:
-        """Retrieve content with error handling"""
         try:
             with open(self.filepath, 'r') as f:
                 data = json.load(f)
@@ -114,11 +111,9 @@ class ContentStore:
 # ==========================================
 
 def generate_unique_id() -> str:
-    """Generate unique content ID"""
     return secrets.token_urlsafe(8)
 
 def is_valid_content_id(content_id: str) -> bool:
-    """Validate content ID format"""
     return bool(re.match(r'^[A-Za-z0-9_-]{8,}$', content_id))
 
 # ==========================================
@@ -126,18 +121,14 @@ def is_valid_content_id(content_id: str) -> bool:
 # ==========================================
 
 async def handle_private_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle messages in private group"""
     try:
-        # Check if message is from monitored group
         private_channel_id = int(os.getenv('PRIVATE_CHANNEL_ID', 0))
         
         if update.message.chat_id != private_channel_id:
             return
         
-        # Generate unique ID
         content_id = generate_unique_id()
         
-        # Save to store
         store = ContentStore()
         store.save_content(
             content_id,
@@ -145,11 +136,9 @@ async def handle_private_group_message(update: Update, context: ContextTypes.DEF
             update.message.message_id
         )
         
-        # Generate deep link
         bot_username = context.bot.username
         deep_link = f"https://t.me/{bot_username}?start={content_id}"
         
-        # Reply with link
         await update.message.reply_text(
             f"✅ Content saved!\n🔗 Share this link:\n{deep_link}",
             disable_web_page_preview=True
@@ -158,35 +147,23 @@ async def handle_private_group_message(update: Update, context: ContextTypes.DEF
         logger.info(f"Created deep link for message {update.message.message_id}")
         
     except StorageError:
-        await update.message.reply_text(
-            "❌ Failed to save content. Please try again."
-        )
+        await update.message.reply_text("❌ Failed to save content. Please try again.")
     except Exception as e:
         logger.error(f"Error in private group handler: {e}")
-        await update.message.reply_text(
-            "❌ An error occurred. Please try again."
-        )
+        await update.message.reply_text("❌ An error occurred. Please try again.")
 
 async def handle_start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /start command with deep link parameter"""
     try:
-        # Detect chat type and respond accordingly
         chat_type = update.effective_chat.type
         
-        # Handle group/channel mentions
         if chat_type in ['group', 'supergroup']:
-            await update.message.reply_text(
-                "👋 Hey! Please message me directly for content access."
-            )
+            await update.message.reply_text("👋 Hey! Please message me directly for content access.")
             return
         
         if chat_type == 'channel':
-            await update.message.reply_text(
-                "📢 Use the links shared here to access exclusive content!"
-            )
+            await update.message.reply_text("📢 Use the links shared here to access exclusive content!")
             return
         
-        # Check for deep link parameter (private chat)
         if not context.args:
             await update.message.reply_text(
                 "👋 Welcome to the CodeNova Bot! created by CodeNova team.\n\n"
@@ -197,18 +174,13 @@ async def handle_start_command(update: Update, context: ContextTypes.DEFAULT_TYP
         
         content_id = context.args[0]
         
-        # Validate content ID format
         if not is_valid_content_id(content_id):
-            await update.message.reply_text(
-                "⚠️ Invalid link format. Please use a valid link."
-            )
+            await update.message.reply_text("⚠️ Invalid link format. Please use a valid link.")
             return
         
-        # Retrieve content info
         store = ContentStore()
         content_info = store.get_content(content_id)
         
-        # Copy message to user
         await context.bot.copy_message(
             chat_id=update.effective_chat.id,
             from_chat_id=content_info['chat_id'],
@@ -219,34 +191,23 @@ async def handle_start_command(update: Update, context: ContextTypes.DEFAULT_TYP
         
     except ContentNotFoundError:
         logger.warning(f"Content not found: {context.args[0] if context.args else 'none'}")
-        await update.message.reply_text(
-            "⚠️ This content is no longer available or the link is invalid."
-        )
+        await update.message.reply_text("⚠️ This content is no longer available or the link is invalid.")
     except Forbidden:
-        logger.error(f"Bot lost access to source message")
-        await update.message.reply_text(
-            "⚠️ This content is no longer accessible."
-        )
+        logger.error("Bot lost access to source message")
+        await update.message.reply_text("⚠️ This content is no longer accessible.")
     except BadRequest as e:
         logger.error(f"Cannot copy message: {e}")
-        await update.message.reply_text(
-            "❌ Unable to retrieve content. It may have been deleted."
-        )
+        await update.message.reply_text("❌ Unable to retrieve content. It may have been deleted.")
     except Exception as e:
         logger.error(f"Error in start handler: {e}")
-        await update.message.reply_text(
-            "❌ An error occurred. Please try again later."
-        )
+        await update.message.reply_text("❌ An error occurred. Please try again later.")
 
 async def error_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Global error handler"""
     logger.error(f"Update {update} caused error: {context.error}")
     
     if update and update.effective_message:
         try:
-            await update.effective_message.reply_text(
-                "😔 Something went wrong. Please try again."
-            )
+            await update.effective_message.reply_text("😔 Something went wrong. Please try again.")
         except Exception:
             pass
 
@@ -255,18 +216,14 @@ async def error_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==========================================
 
 def main():
-    """Start the bot"""
-    # Get bot token
     bot_token = os.getenv('BOT_TOKEN')
     
     if not bot_token:
         logger.error("BOT_TOKEN not found in environment variables!")
         return
     
-    # Create application
     application = Application.builder().token(bot_token).build()
     
-    # Add handlers
     application.add_handler(CommandHandler('start', handle_start_command))
     application.add_handler(
         MessageHandler(
@@ -275,10 +232,8 @@ def main():
         )
     )
     
-    # Add error handler
     application.add_error_handler(error_callback)
     
-    # Start bot
     logger.info("Bot started successfully!")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
